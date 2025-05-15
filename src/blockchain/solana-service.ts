@@ -181,8 +181,8 @@ export const getUserWallet = async (userId: string, platform: string = 'discord'
     });
     
     // If successful, return the wallet address
-    if (response.data && response.data.status === 'success' && response.data.wallet) {
-      return response.data.wallet.publicKey;
+    if (response.data && response.data.success && response.data.data) {
+      return response.data.data.publicKey;
     }
     
     return null;
@@ -211,8 +211,8 @@ export const getOrCreateUserWallet = async (userId: string, platform: string = '
       label: `${normalizedPlatform}-${userId}`
     });
     
-    if (response.data && response.data.status === 'success' && response.data.wallet) {
-      return response.data.wallet.publicKey;
+    if (response.data && response.data.success && response.data.data) {
+      return response.data.data.publicKey;
     }
     
     throw new Error('Failed to create wallet: Invalid response from API');
@@ -292,6 +292,38 @@ export const getTokenBalances = async (walletAddress: string): Promise<Array<{sy
   } catch (error: any) {
     console.error('Error getting token balances:', error.message);
     throw new Error(`Failed to get token balances: ${error.response?.data?.message || error.message}`);
+  }
+};
+
+/**
+ * Get a user's complete profile with wallet, social accounts, and transaction history
+ * 
+ * @param userId User's username or ID
+ * @param platform Platform the user is on (discord, twitter, telegram)
+ * @returns User profile data or null if not found
+ */
+export const getUserProfile = async (userId: string, platform: string = 'discord'): Promise<any | null> => {
+  try {
+    // Normalize platform
+    const normalizedPlatform = validatePlatform(platform);
+    
+    // Call the API to get the complete user profile
+    const response = await apiClient.get('/api/user/profile/social', {
+      params: {
+        platform: normalizedPlatform,
+        platformId: userId
+      }
+    });
+    
+    // If successful, return the profile data
+    if (response.data && response.data.success && response.data.data) {
+      return response.data.data;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+    return null;
   }
 };
 
@@ -380,6 +412,24 @@ export const executeTransaction = async (
         }
         
         console.log(`SOL transfer completed: ${signature}, wallet created: ${walletCreated}`);
+        
+        // Record the transaction in our new API endpoint
+        try {
+          const senderWalletInfo = await getUserProfile(senderUsername, normalizedPlatform);
+          if (senderWalletInfo && senderWalletInfo.wallets && senderWalletInfo.wallets.length > 0) {
+            await recordTransaction({
+              signature,
+              senderWalletId: senderWalletInfo.wallets[0].id,
+              recipientAddress: await getUserWallet(recipientUsername, normalizedPlatform) || 'unknown',
+              amount,
+              tokenSymbol: 'SOL',
+              status: 'confirmed'
+            });
+          }
+        } catch (recordError) {
+          console.error('Failed to record transaction:', recordError);
+          // Don't throw error here, we still want to return the transaction result
+        }
         
         return { 
           signature, 
@@ -531,7 +581,7 @@ export const linkUserWallet = async (
       walletPublicKey
     });
     
-    return response.data && response.data.status === 'success';
+    return response.data && response.data.success;
   } catch (error) {
     console.error('Error linking wallet:', error);
     return false;
@@ -606,6 +656,10 @@ export interface TransactionInfo {
   fee: number;
   accounts?: string[];
   logs?: string[];
+  // Add properties needed for display in the command processor
+  amount?: number;
+  tokenMint?: string;
+  tokenSymbol?: string;
 }
 
 /**
@@ -631,7 +685,7 @@ export interface NetworkStatus {
 }
 
 /**
- * Get detailed information about a transaction by signature
+ * Get transaction details by signature
  * 
  * @param signature Solana transaction signature
  * @returns Transaction details
@@ -642,40 +696,31 @@ export const getTransactionDetails = async (signature: string): Promise<Transact
       throw new Error('Transaction signature is required');
     }
 
-    // Call the MCP tool endpoint to get transaction details
-    const response = await apiClient.post('/api/mcp/tools/getTransaction', {
-      signature
-    });
+    // Call the API endpoint to get transaction details
+    const response = await apiClient.get(`/api/transaction/${signature}`);
     
     // Check for successful response
-    if (!response.data || !response.data.data || !response.data.data.result || !response.data.data.result.content) {
-      console.error('Invalid response format from getTransaction:', response.data);
+    if (!response.data || !response.data.success || !response.data.data) {
+      console.error('Invalid response format from transaction endpoint:', response.data);
       throw new Error('Invalid response format from server');
     }
     
-    const responseText = response.data.data.result.content[0].text;
+    const transaction = response.data.data;
     
-    // Parse the response to extract transaction details
-    // This is a simplified parsing approach - ideally you'd want to parse JSON if available
-    const txInfo: TransactionInfo = {
+    // Return the transaction info in our standardized format
+    return {
       signature,
-      status: responseText.includes('Status: success') ? 'success' : 'error',
-      fee: parseFloat(responseText.match(/Fee: (\d+) lamports/)?.[1] || '0'),
-      blockTime: undefined, // Set if available
+      status: transaction.status === 'confirmed' ? 'success' : 'error',
+      blockTime: transaction.block_time || undefined,
+      fee: transaction.fee || 0,
       accounts: [],
-      logs: []
+      logs: [],
+      amount: transaction.amount,
+      tokenMint: transaction.token_mint,
+      tokenSymbol: transaction.token_symbol
     };
-    
-    // Try to extract block time if present
-    const blockTimeMatch = responseText.match(/Block time: (\d+)/);
-    if (blockTimeMatch && blockTimeMatch[1]) {
-      txInfo.blockTime = parseInt(blockTimeMatch[1]);
-    }
-    
-    return txInfo;
   } catch (error: any) {
     console.error('Error getting transaction details:', error.message);
-    // Include more detailed error info for easier debugging
     if (error.response) {
       console.error('Server response:', {
         status: error.response.status,
@@ -684,6 +729,99 @@ export const getTransactionDetails = async (signature: string): Promise<Transact
       });
     }
     throw new Error(`Failed to get transaction details: ${error.response?.data?.message || error.message}`);
+  }
+};
+
+/**
+ * Get wallet transaction history
+ * 
+ * @param walletAddress Wallet address to get transactions for
+ * @param limit Maximum number of transactions to return
+ * @param offset Pagination offset
+ * @returns Array of transactions
+ */
+export const getWalletTransactions = async (
+  walletAddress: string,
+  limit: number = 10,
+  offset: number = 0
+): Promise<TransactionInfo[]> => {
+  try {
+    if (!walletAddress) {
+      throw new Error('Wallet address is required');
+    }
+
+    // Call the API endpoint to get wallet transactions
+    const response = await apiClient.get(`/api/transaction/wallet/${walletAddress}`, {
+      params: { limit, offset }
+    });
+    
+    // Check for successful response
+    if (!response.data || !response.data.success || !response.data.data) {
+      console.error('Invalid response format from wallet transactions endpoint:', response.data);
+      throw new Error('Invalid response format from server');
+    }
+    
+    const { transactions, count } = response.data.data;
+    
+    // Convert the transaction data to our standard format
+    return transactions.map((tx: any) => ({
+      signature: tx.signature,
+      status: tx.status === 'confirmed' ? 'success' : 'error',
+      blockTime: tx.block_time,
+      fee: tx.fee || 0,
+      amount: tx.amount,
+      tokenMint: tx.token_mint,
+      tokenSymbol: tx.token_symbol
+    }));
+  } catch (error: any) {
+    console.error('Error getting wallet transactions:', error.message);
+    if (error.response) {
+      console.error('Server response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
+    throw new Error(`Failed to get wallet transactions: ${error.response?.data?.message || error.message}`);
+  }
+};
+
+/**
+ * Record a new transaction
+ * 
+ * @param transactionData Transaction data to record
+ * @returns Recorded transaction
+ */
+export const recordTransaction = async (transactionData: {
+  signature: string;
+  senderWalletId: number;
+  recipientAddress: string;
+  amount: number;
+  tokenMint?: string;
+  tokenSymbol?: string;
+  status?: 'pending' | 'confirmed' | 'failed';
+}): Promise<any> => {
+  try {
+    // Call the API endpoint to record the transaction
+    const response = await apiClient.post('/api/transaction', transactionData);
+    
+    // Check for successful response
+    if (!response.data || !response.data.success || !response.data.data) {
+      console.error('Invalid response format from record transaction endpoint:', response.data);
+      throw new Error('Invalid response format from server');
+    }
+    
+    return response.data.data;
+  } catch (error: any) {
+    console.error('Error recording transaction:', error.message);
+    if (error.response) {
+      console.error('Server response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
+    throw new Error(`Failed to record transaction: ${error.response?.data?.message || error.message}`);
   }
 };
 

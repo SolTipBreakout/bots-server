@@ -1,4 +1,4 @@
-import { getUserWallet, getWalletBalance, getTokenBalances, executeTransaction, linkUserWallet, getSupportedTokens, getTokenInfo, getTokenPrice, getOrCreateUserWallet, getTransactionDetails, getAccountInfo, getNetworkStatus } from '../blockchain/solana-service';
+import { getUserWallet, getWalletBalance, getTokenBalances, executeTransaction, linkUserWallet, getSupportedTokens, getTokenInfo, getTokenPrice, getOrCreateUserWallet, getTransactionDetails, getAccountInfo, getNetworkStatus, getWalletTransactions, getUserProfile } from '../blockchain/solana-service';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -243,6 +243,88 @@ To use a different wallet, please contact support.`;
     }
   }
   
+  else if (command === 'history') {
+    // Get user's wallet
+    const userWallet = await getUserWallet(senderUsername, platform);
+    
+    if (!userWallet) {
+      return `You need to connect your wallet first. Use "connect YOUR_WALLET_ADDRESS" or visit ${process.env.APP_URL} to get started.`;
+    }
+    
+    try {
+      // Get transaction history
+      const transactions = await getWalletTransactions(userWallet, 5);
+      
+      if (!transactions || transactions.length === 0) {
+        return `No transaction history found for your wallet.`;
+      }
+      
+      // Format transactions for display
+      let result = `Recent transactions for your wallet:\n`;
+      
+      transactions.forEach((tx, index) => {
+        const date = tx.blockTime ? new Date(tx.blockTime * 1000).toLocaleString() : 'Pending';
+        const status = tx.status === 'success' ? '✅' : '❌';
+        const amount = tx.amount ? `${tx.amount} ${tx.tokenSymbol || 'SOL'}` : 'N/A';
+        
+        result += `${index + 1}. ${status} ${amount} [${date}]\n   ${process.env.EXPLORER_URL}/tx/${tx.signature}\n`;
+      });
+      
+      return result;
+    } catch (error: any) {
+      console.error('Error fetching transaction history:', error);
+      return `Failed to fetch transaction history: ${error.message}`;
+    }
+  }
+  
+  else if (command === 'profile') {
+    try {
+      // Get user profile
+      const profile = await getUserProfile(senderUsername, platform);
+      
+      if (!profile) {
+        return `No profile found. Use "register" to create a wallet first.`;
+      }
+      
+      // Format profile information
+      let result = `📊 Your SolBreakout Profile:\n`;
+      
+      // Add wallet info
+      if (profile.wallets && profile.wallets.length > 0) {
+        const wallet = profile.wallets[0];
+        result += `💼 Wallet: ${wallet.public_key}\n`;
+        result += `🏷️ Label: ${wallet.label || 'No label'}\n`;
+      }
+      
+      // Add social accounts
+      if (profile.socialAccounts && profile.socialAccounts.length > 0) {
+        result += `\n🔗 Linked accounts:\n`;
+        profile.socialAccounts.forEach((account: any) => {
+          result += `- ${account.platform}: ${account.platform_id}\n`;
+        });
+      }
+      
+      // Add recent transactions
+      if (profile.transactions && profile.transactions.length > 0) {
+        result += `\n📝 Recent transactions:\n`;
+        profile.transactions.slice(0, 3).forEach((tx: any, index: number) => {
+          const date = tx.block_time ? new Date(tx.block_time * 1000).toLocaleString() : 'Pending';
+          const status = tx.status === 'confirmed' ? '✅' : (tx.status === 'failed' ? '❌' : '⏳');
+          result += `${index + 1}. ${status} ${tx.amount} ${tx.token_symbol || 'SOL'} [${date}]\n`;
+        });
+        
+        result += `\nUse "history" to see more transactions.`;
+      } else {
+        result += `\nNo recent transactions found.`;
+      }
+      
+      return result;
+    } catch (error: any) {
+      console.error('Error fetching user profile:', error);
+      return `Failed to fetch user profile: ${error.message}`;
+    }
+  }
+  
   else if (command === 'help') {
     const supportedTokens = getSupportedTokens().join(', ');
     return `Available commands:
@@ -254,6 +336,8 @@ To use a different wallet, please contact support.`;
 - tokens-info - Show supported token details
 - price [token] - Check current token price
 - address - Show your wallet address
+- history - View your recent transactions
+- profile - View your complete profile
 - connect ADDRESS - Connect your external wallet 
 - transaction SIGNATURE - Get transaction details
 - account ADDRESS - Get account information

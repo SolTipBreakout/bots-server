@@ -2,6 +2,16 @@
 
 SolTip is a cross-platform Solana tipping application that enables users to send SOL and tokens to others via Twitter, Telegram, and Discord.
 
+## ⚠️ Security Disclaimer
+
+**WARNING: This code has NOT been professionally audited and is not recommended for production use without a thorough security review.**
+
+- This codebase handles private keys and cryptocurrency transactions
+- The implementation has not undergone professional security auditing
+- There may be vulnerabilities or security issues that could lead to loss of funds
+- Use at your own risk and only with test accounts and small amounts
+- We strongly recommend a comprehensive security audit before any production deployment
+
 ## Features
 
 - Send SOL and other Solana tokens to users across different platforms
@@ -135,4 +145,4 @@ Use slash commands in any channel where the bot is present:
 
 ## License
 
-ISC 
+MIT

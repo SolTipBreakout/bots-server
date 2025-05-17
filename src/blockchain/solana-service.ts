@@ -944,4 +944,75 @@ export const getNetworkStatus = async (): Promise<NetworkStatus> => {
     }
     throw new Error(`Failed to get network status: ${error.response?.data?.message || error.message}`);
   }
+};
+
+export interface ExportPrivateKeyResult {
+  success: boolean;
+  privateKey?: string;
+  error?: string;
+}
+
+export const exportWalletPrivateKey = async (username: string, platform: string): Promise<ExportPrivateKeyResult> => {
+  // Export private key only from Telegram platform for security reasons
+  if (platform !== 'telegram') {
+    console.log(`Rejected private key export from unauthorized platform: ${platform}`);
+    return {
+      success: false,
+      error: 'Private key export is only available on Telegram for security reasons'
+    };
+  }
+  
+  try {
+    // Get wallet address for the user
+    const wallet = await getUserWallet(username, platform);
+    console.log(`Attempting to export private key for user ${username}, wallet found: ${wallet ? 'yes' : 'no'}`);
+    
+    if (!wallet) {
+      return {
+        success: false,
+        error: 'Wallet not found or not connected'
+      };
+    }
+    
+    // Call API endpoint to export private key
+    console.log(`Calling API to export private key for wallet: ${wallet}`);
+    const response = await apiClient.post('/api/user/wallet/export-private-key', {
+      walletPublicKey: wallet
+    });
+    
+    // Log the response structure (without sensitive data)
+    console.log('API response structure:', {
+      success: response.data?.success,
+      hasData: !!response.data?.data,
+      hasPrivateKey: !!response.data?.data?.privateKey
+    });
+    
+    if (response.data && response.data.data?.privateKey) {
+      console.log('Successfully retrieved private key');
+      return {
+        success: true,
+        privateKey: response.data.data.privateKey
+      };
+    } else {
+      console.log('Private key not found in response:', response.data);
+      return {
+        success: false,
+        error: 'Private key not found in response'
+      };
+    }
+  } catch (error: any) {
+    console.error('Error exporting private key:', error);
+    // Add more detailed error information
+    if (error.response) {
+      console.error('API error response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
+    return {
+      success: false,
+      error: error.message || 'Unknown error exporting private key'
+    };
+  }
 }; 

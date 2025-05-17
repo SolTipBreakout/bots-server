@@ -39,7 +39,7 @@ export const setupDiscordBot = (useMinimalIntents = false) => {
     const commands = [
       new SlashCommandBuilder()
         .setName('send')
-        .setDescription('Send SOL to another user')
+        .setDescription('💸 Send SOL to another user')
         .addUserOption(option => 
           option.setName('user')
             .setDescription('The user to send SOL to')
@@ -54,13 +54,13 @@ export const setupDiscordBot = (useMinimalIntents = false) => {
             .setRequired(false)),
       new SlashCommandBuilder()
         .setName('balance')
-        .setDescription('Check your SOL balance'),
+        .setDescription('💰 Check your SOL balance'),
       new SlashCommandBuilder()
         .setName('tokens')
-        .setDescription('List your token balances'),
+        .setDescription('🪙 List your token balances'),
       new SlashCommandBuilder()
         .setName('address')
-        .setDescription('Show your wallet address'),
+        .setDescription('🔑 Show your wallet address'),
     ];
 
     const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN!);

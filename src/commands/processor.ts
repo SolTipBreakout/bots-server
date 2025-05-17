@@ -1,7 +1,12 @@
-import { getUserWallet, getWalletBalance, getTokenBalances, executeTransaction, linkUserWallet, getSupportedTokens, getTokenInfo, getTokenPrice, getOrCreateUserWallet, getTransactionDetails, getAccountInfo, getNetworkStatus, getWalletTransactions, getUserProfile } from '../blockchain/solana-service';
+import { getUserWallet, getWalletBalance, getTokenBalances, executeTransaction, linkUserWallet, getSupportedTokens, getTokenInfo, getTokenPrice, getOrCreateUserWallet, getTransactionDetails, getAccountInfo, getNetworkStatus, getWalletTransactions, getUserProfile, exportWalletPrivateKey, ExportPrivateKeyResult } from '../blockchain/solana-service';
 import * as dotenv from 'dotenv';
+import * as crypto from 'crypto';
 
 dotenv.config();
+
+// Add a map to store verification codes for private key exports
+// This should be outside the processCommand function
+const privateKeyVerificationCodes = new Map<string, string>();
 
 /**
  * Process commands from different platforms
@@ -22,6 +27,66 @@ export const processCommand = async (
   );
   
   const command = cleanWords[0]?.toLowerCase();
+  
+  if (!command) {
+    return "Please enter a command. Type 'help' to see available commands.";
+  }
+  
+  // Check if the command is exporting a private key with a verification code
+  if (cleanWords.length >= 2 && command === 'export-privatekey') {
+    console.log(`Processing export-privatekey with possible code: ${cleanWords[1]}`);
+    // Only available on Telegram platform for security reasons
+    if (platform !== 'telegram') {
+      return '⚠️ For security reasons, this command is only available in private messages on Telegram.';
+    }
+
+    // Get the verification code (second word)
+    const providedCode = cleanWords[1].trim();
+    
+    // Check if this is a verification code attempt (6 digits) or just a normal privatekey request
+    if (/^\d{6}$/.test(providedCode)) {
+      console.log(`Valid verification code format: ${providedCode}`);
+      
+      // Get the stored verification code for this user
+      const expectedCode = privateKeyVerificationCodes.get(`${platform}:${senderUsername}`);
+      console.log(`Expected code for ${platform}:${senderUsername}: ${expectedCode || 'none'}`);
+      
+      if (!expectedCode) {
+        return '⚠️ Verification code expired or not found. Please request a new code by typing "export-privatekey".';
+      }
+      
+      if (providedCode !== expectedCode) {
+        return '❌ Invalid verification code. Please try again with the correct code.';
+      }
+      
+      // Code is correct, remove it to prevent reuse
+      privateKeyVerificationCodes.delete(`${platform}:${senderUsername}`);
+
+      // Check if user has a wallet
+      const wallet = await getUserWallet(senderUsername, platform);
+      console.log(`Export private key with code - wallet found: ${!!wallet}`);
+      
+      if (!wallet) {
+        return '❌ You need to connect your wallet first. Visit our website to connect.';
+      }
+
+      try {
+        console.log(`Calling exportWalletPrivateKey for user ${senderUsername}`);
+        const result = await exportWalletPrivateKey(senderUsername, platform);
+        console.log(`Export result success: ${result.success}`);
+        
+        if (result.success) {
+          return `Your private key is: ${result.privateKey}\n\n⚠️ This message will self-destruct in 60 seconds for security.`;
+        } else {
+          return `Failed to export private key: ${result.error || 'Unknown error'}`;
+        }
+      } catch (error) {
+        console.error('Error exporting private key:', error);
+        return 'An error occurred while trying to export your private key.';
+      }
+    }
+    // Otherwise, fall through to the normal export-privatekey warning message below
+  }
   
   if (command === 'send' || command === 'tip') {
     // Format: send @recipient 1 SOL
@@ -325,26 +390,74 @@ To use a different wallet, please contact support.`;
     }
   }
   
-  else if (command === 'help') {
-    const supportedTokens = getSupportedTokens().join(', ');
-    return `Available commands:
-- register - Create a new custodial wallet
-- send @user amount [token] - Send tokens to another user
-  (Supported tokens: ${supportedTokens})
-- balance - Check your SOL balance
-- tokens - List your token balances
-- tokens-info - Show supported token details
-- price [token] - Check current token price
-- address - Show your wallet address
-- history - View your recent transactions
-- profile - View your complete profile
-- connect ADDRESS - Connect your external wallet 
-- transaction SIGNATURE - Get transaction details
-- account ADDRESS - Get account information
-- network - Check Solana network status
-- help - Show this help message`;
+  else if (command === 'export-privatekey') {
+    console.log('Processing export-privatekey initial request');
+    // Only available on Telegram platform for security reasons
+    if (platform !== 'telegram') {
+      return '⚠️ For security reasons, this command is only available in private messages on Telegram.';
+    }
+
+    // Check if user has a wallet
+    const wallet = await getUserWallet(senderUsername, platform);
+    if (!wallet) {
+      return '❌ You need to connect your wallet first. Visit our website to connect.';
+    }
+
+    // Generate a random 6-digit code
+    const verificationCode = crypto.randomInt(100000, 999999).toString();
+    
+    // Store the code for this user (expires in 5 minutes)
+    privateKeyVerificationCodes.set(`${platform}:${senderUsername}`, verificationCode);
+    setTimeout(() => {
+      // Remove the code after 5 minutes for security
+      privateKeyVerificationCodes.delete(`${platform}:${senderUsername}`);
+    }, 5 * 60 * 1000);
+
+    // Display warning message and the verification code
+    return `⚠️ **SECURITY WARNING** ⚠️
+
+Your private key is the master key to your wallet. Anyone with your private key can:
+- Steal all your tokens and NFTs
+- Make transactions on your behalf
+- Take complete control of your wallet
+
+NEVER share your private key with anyone. NEVER enter it on websites.
+
+Your verification code is: ${verificationCode}
+
+To proceed with exporting your private key, use this command:
+export-privatekey ${verificationCode}
+
+The key will be sent to you and automatically deleted after 60 seconds.
+This verification code will expire in 5 minutes.`;
   }
   
+  else if (command === 'help') {
+    const supportedTokens = getSupportedTokens().join(', ');
+    let helpText = `🎮 *Available Commands* 🎮\n\n`;
+    helpText += `✨ /register - Create a new custodial wallet\n`;
+    helpText += `💸 /send @user amount [token] - Send tokens to another user\n`;
+    helpText += `   (Supported tokens: ${supportedTokens})\n`;
+    helpText += `💰 /balance - Check your SOL balance\n`;
+    helpText += `🪙 /tokens - List your token balances\n`;
+    helpText += `ℹ️ /tokens-info - Show supported token details\n`;
+    helpText += `📈 /price [token] - Check current token price\n`;
+    helpText += `🔑 /address - Show your wallet address\n`;
+    helpText += `📜 /history - View your recent transactions\n`;
+    helpText += `👤 /profile - View your complete profile\n`;
+    helpText += `🔌 /connect ADDRESS - Connect external wallet\n`;
+    helpText += `🔍 /transaction SIGNATURE - Get transaction details\n`;
+    helpText += `📝 /account ADDRESS - Get account information\n`;
+    helpText += `🌐 /network - Check Solana network status`;
+
+    if (platform === 'telegram') {
+      helpText += `\n🔐 /export-privatekey - Export wallet private key (requires verification code)`;
+    }
+
+    helpText += `\n❓ /help - Show this help message`;
+    
+    return helpText;
+  }
   else if (command === 'transaction') {
     // Format: transaction TX_SIGNATURE
     const signature = cleanWords[1];

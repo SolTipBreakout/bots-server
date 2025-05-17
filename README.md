@@ -27,6 +27,8 @@ SolTip leverages:
 
 ## Setup
 
+### Local Development
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/yourusername/soltip.git
@@ -35,25 +37,50 @@ SolTip leverages:
 
 2. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. Create a `.env` file in the root directory with your credentials (see `.env.example` for required variables)
 
 4. Build the project:
    ```bash
-   npm run build
+   pnpm build
    ```
 
 5. Start the application:
    ```bash
-   npm start
+   pnpm start
    ```
 
 For development, you can use:
 ```bash
-npm run dev
+pnpm run dev
 ```
+
+### Docker Deployment
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/soltip.git
+   cd soltip
+   ```
+
+2. Create a `.env` file in the root directory with your credentials (see `.env.example` for required variables)
+
+3. Build and start the Docker containers:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. To view logs:
+   ```bash
+   docker-compose logs -f
+   ```
+
+5. To stop the containers:
+   ```bash
+   docker-compose down
+   ```
 
 ## Bot Usage
 

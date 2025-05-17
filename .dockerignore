@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.env
+.env.example
+README.md
+ARCHTECTURE.md
+.gitignore
+data
+*.log
+twitter-cookies.json 
